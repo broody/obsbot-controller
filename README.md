@@ -18,6 +18,12 @@ An Electron application for controlling OBSBOT webcams on Linux. This app provid
 - **Preset Positions**: Save and recall camera positions
 - **Gesture Control**: Enable/disable gesture recognition features
 
+## OBSBOT SDK
+
+The OBSBOT driver/SDK is not open source. Ideally, you should request the SDK from [https://www.obsbot.com/sdk](https://www.obsbot.com/sdk).
+
+However, for convenience, the necessary library files (`libdev.so` and headers) have been bundled into this repository under the `sdk/` directory. This allows the application to build and run without external dependencies.
+
 ## Supported Devices
 
 - OBSBOT Tiny series (Tiny, Tiny 4K, Tiny 2, Tiny 2 Lite, Tiny SE)
@@ -119,6 +125,7 @@ npm start
 
 ```
 electron-app/
+├── sdk/                # Bundled OBSBOT SDK (headers & libs)
 ├── src/
 │   ├── main/           # Electron main process
 │   │   ├── index.ts    # Main entry point
@@ -137,20 +144,6 @@ electron-app/
 ```
 
 ## Troubleshooting
-
-### Native addon fails to build
-
-Make sure you have the OBSBOT SDK in the correct location:
-```
-../libdev_v2.1.0_7/
-├── include/
-│   └── dev/
-│       ├── dev.hpp
-│       └── devs.hpp
-└── linux(beta)/
-    └── x86_64-release/
-        └── libdev.so
-```
 
 ### Device not detected
 
@@ -188,4 +181,4 @@ sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
 
 ## License
 
-This project uses the OBSBOT SDK which has its own licensing terms.
+This project uses the OBSBOT SDK which has its own licensing terms. You can request the SDK at [https://www.obsbot.com/sdk](https://www.obsbot.com/sdk).

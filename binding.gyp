@@ -11,19 +11,28 @@
       ],
       "include_dirs": [
         "<!@(node -p \"require('node-addon-api').include\")",
-        "../libdev_v2.1.0_7/include"
+        "sdk/include"
       ],
       "libraries": [
-        "-L<(module_root_dir)/../libdev_v2.1.0_7/linux\\(beta\\)/x86_64-release",
-        "-ldev",
-        "-Wl,-rpath,<(module_root_dir)/../libdev_v2.1.0_7/linux\\(beta\\)/x86_64-release"
+        "-L<(module_root_dir)/sdk/lib",
+        "-ldev"
+      ],
+      "copies": [
+        {
+          "destination": "<(PRODUCT_DIR)",
+          "files": [
+            "<(module_root_dir)/sdk/lib/libdev.so",
+            "<(module_root_dir)/sdk/lib/libdev.so.1",
+            "<(module_root_dir)/sdk/lib/libdev.so.1.0.2"
+          ]
+        }
       ],
       "defines": ["NAPI_DISABLE_CPP_EXCEPTIONS"],
       "conditions": [
         ["OS=='linux'", {
           "cflags": ["-fPIC"],
           "ldflags": [
-            "-Wl,-rpath,'$$ORIGIN/../libdev_v2.1.0_7/linux(beta)/x86_64-release'"
+            "-Wl,-rpath,'$$ORIGIN'"
           ]
         }]
       ]
