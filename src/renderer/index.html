@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; media-src 'self' blob:;">
+    <title>OBSBOT Controller</title>
+    <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+    <div class="app">
+        <!-- Header -->
+        <header class="header">
+            <h1>OBSBOT Controller</h1>
+            <div class="device-selector">
+                <label for="device-select">Device:</label>
+                <select id="device-select">
+                    <option value="">No device connected</option>
+                </select>
+                <button id="refresh-devices" class="btn btn-icon" title="Refresh devices">↻</button>
+            </div>
+        </header>
+
+        <!-- Main content -->
+        <main class="main">
+            <!-- Video preview -->
+            <section class="video-section">
+                <div class="video-container">
+                    <video id="video-preview" autoplay playsinline></video>
+                    <div id="video-placeholder" class="video-placeholder">
+                        <span>Connect a device to see preview</span>
+                    </div>
+                </div>
+                <div class="video-controls">
+                    <button id="start-preview" class="btn">Start Preview</button>
+                    <button id="stop-preview" class="btn">Stop Preview</button>
+                    <button id="record-btn" class="btn btn-record">Record</button>
+                    <span id="record-timer" class="record-timer hidden">00:00</span>
+                </div>
+
+                <!-- Audio Visualizer -->
+                <div class="audio-visualizer-section">
+                    <div class="visualizer-header">
+                        <h4>Audio Input</h4>
+                        <div class="visualizer-controls">
+                            <button id="toggle-audio" class="btn btn-small active">Disable Mic</button>
+                            <select id="visualizer-type">
+                                <option value="bars">Frequency Bars</option>
+                                <option value="waveform">Waveform</option>
+                                <option value="circular">Circular</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="visualizer-container">
+                        <canvas id="audio-visualizer"></canvas>
+                        <div id="audio-level" class="audio-level">
+                            <div class="level-bar"></div>
+                            <span class="level-value">-∞ dB</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Controls panel -->
+            <aside class="controls-panel">
+                <!-- Tabs -->
+                <div class="tabs">
+                    <button class="tab active" data-tab="gimbal">Gimbal</button>
+                    <button class="tab" data-tab="camera">Camera</button>
+                    <button class="tab" data-tab="ai">AI</button>
+                    <button class="tab" data-tab="presets">Presets</button>
+                </div>
+
+                <!-- Tab content -->
+                <div class="tab-content">
+                    <!-- Gimbal Controls -->
+                    <div id="tab-gimbal" class="tab-pane active">
+                        <h3>Gimbal Control</h3>
+
+                        <div class="control-group">
+                            <h4>Position Control</h4>
+                            <div class="gimbal-joystick">
+                                <div id="joystick-container" class="joystick-container">
+                                    <div id="joystick" class="joystick"></div>
+                                </div>
+                                <p class="help-text">Drag to move gimbal</p>
+                            </div>
+
+                            <div class="gimbal-state">
+                                <div class="state-row">
+                                    <span>Pitch:</span>
+                                    <span id="gimbal-pitch">0.0°</span>
+                                </div>
+                                <div class="state-row">
+                                    <span>Yaw:</span>
+                                    <span id="gimbal-yaw">0.0°</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="control-group">
+                            <h4>Quick Actions</h4>
+                            <div class="button-row">
+                                <button id="gimbal-reset" class="btn">Reset Position</button>
+                                <button id="gimbal-stop" class="btn">Stop</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Camera Controls -->
+                    <div id="tab-camera" class="tab-pane">
+                        <h3>Camera Settings</h3>
+
+                        <div class="control-group">
+                            <h4>Zoom</h4>
+                            <div class="slider-control">
+                                <input type="range" id="zoom-slider" min="100" max="400" value="100">
+                                <span id="zoom-value">1.0x</span>
+                            </div>
+                        </div>
+
+                        <div class="control-group">
+                            <h4>Focus</h4>
+                            <div class="select-control">
+                                <label for="focus-mode">Mode:</label>
+                                <select id="focus-mode">
+                                    <option value="0">Auto Select</option>
+                                    <option value="1">Continuous (AFC)</option>
+                                    <option value="2">Single (AFS)</option>
+                                    <option value="3">Manual (MF)</option>
+                                </select>
+                            </div>
+                            <div class="toggle-row">
+                                <label>
+                                    <input type="checkbox" id="face-focus">
+                                    Face Priority
+                                </label>
+                            </div>
+                            <div class="slider-control" id="manual-focus-control">
+                                <label>Manual Focus</label>
+                                <input type="range" id="focus-slider" min="0" max="100" value="50">
+                                <span id="focus-value">50</span>
+                            </div>
+                        </div>
+
+                        <div class="control-group">
+                            <h4>Exposure</h4>
+                            <div class="select-control">
+                                <label for="exposure-mode">Mode:</label>
+                                <select id="exposure-mode">
+                                    <option value="1">Auto</option>
+                                    <option value="2">Manual</option>
+                                    <option value="4">Shutter Priority</option>
+                                    <option value="8">Aperture Priority</option>
+                                </select>
+                            </div>
+                            <div class="slider-control">
+                                <label>Exposure Value</label>
+                                <input type="range" id="exposure-slider" min="-10" max="10" value="0">
+                                <span id="exposure-value">0</span>
+                            </div>
+                            <div class="toggle-row">
+                                <label>
+                                    <input type="checkbox" id="ae-lock">
+                                    AE Lock
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="control-group">
+                            <h4>White Balance</h4>
+                            <div class="select-control">
+                                <label for="wb-mode">Mode:</label>
+                                <select id="wb-mode">
+                                    <option value="0">Auto</option>
+                                    <option value="1">Manual</option>
+                                    <option value="2">Sunny</option>
+                                    <option value="3">Cloudy</option>
+                                    <option value="4">Shade</option>
+                                    <option value="5">Incandescent</option>
+                                    <option value="6">Fluorescent</option>
+                                </select>
+                            </div>
+                            <div class="slider-control" id="wb-manual-control" style="display: none;">
+                                <label>Temperature</label>
+                                <input type="range" id="wb-slider" min="2800" max="6500" value="5600">
+                                <span id="wb-value">5600K</span>
+                            </div>
+                        </div>
+
+                        <div class="control-group">
+                            <h4>Image Adjustments</h4>
+                            <div class="slider-control">
+                                <label>Brightness</label>
+                                <input type="range" id="brightness-slider" min="-100" max="100" value="0">
+                                <span id="brightness-value">0</span>
+                            </div>
+                            <div class="slider-control">
+                                <label>Contrast</label>
+                                <input type="range" id="contrast-slider" min="-100" max="100" value="0">
+                                <span id="contrast-value">0</span>
+                            </div>
+                            <div class="slider-control">
+                                <label>Saturation</label>
+                                <input type="range" id="saturation-slider" min="-100" max="100" value="0">
+                                <span id="saturation-value">0</span>
+                            </div>
+                            <div class="slider-control">
+                                <label>Sharpness</label>
+                                <input type="range" id="sharpness-slider" min="0" max="100" value="50">
+                                <span id="sharpness-value">50</span>
+                            </div>
+                        </div>
+
+                        <div class="control-group">
+                            <h4>HDR / WDR</h4>
+                            <div class="select-control">
+                                <label for="hdr-mode">Mode:</label>
+                                <select id="hdr-mode">
+                                    <option value="0">Off</option>
+                                    <option value="1">On</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="control-group">
+                            <h4>Field of View</h4>
+                            <div class="button-group">
+                                <button class="btn fov-btn" data-fov="0">86° Wide</button>
+                                <button class="btn fov-btn" data-fov="1">78° Medium</button>
+                                <button class="btn fov-btn" data-fov="2">65° Narrow</button>
+                            </div>
+                        </div>
+
+                        <div class="control-group">
+                            <h4>Mirror / Flip</h4>
+                            <div class="button-group">
+                                <button class="btn mirror-btn" data-mode="0">Normal</button>
+                                <button class="btn mirror-btn" data-mode="1">H-Flip</button>
+                                <button class="btn mirror-btn" data-mode="2">V-Flip</button>
+                                <button class="btn mirror-btn" data-mode="3">Both</button>
+                            </div>
+                        </div>
+
+                        <div class="control-group">
+                            <h4>Anti-Flicker</h4>
+                            <div class="button-group">
+                                <button class="btn flicker-btn" data-mode="0">Auto</button>
+                                <button class="btn flicker-btn" data-mode="1">50Hz</button>
+                                <button class="btn flicker-btn" data-mode="2">60Hz</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- AI Controls -->
+                    <div id="tab-ai" class="tab-pane">
+                        <h3>AI Tracking</h3>
+
+                        <div class="control-group">
+                            <h4>AI Mode</h4>
+                            <div class="toggle-row">
+                                <label>
+                                    <input type="checkbox" id="ai-enabled">
+                                    Enable AI Tracking
+                                </label>
+                            </div>
+                            <div class="select-control">
+                                <label for="ai-mode">Mode:</label>
+                                <select id="ai-mode">
+                                    <option value="0">Off</option>
+                                    <option value="1">Group</option>
+                                    <option value="2">Human</option>
+                                    <option value="3">Hand</option>
+                                    <option value="4">Whiteboard</option>
+                                    <option value="5">Desk</option>
+                                </select>
+                            </div>
+                            <div class="select-control" id="ai-submode-control">
+                                <label for="ai-submode">Sub-mode:</label>
+                                <select id="ai-submode">
+                                    <option value="0">Normal</option>
+                                    <option value="1">Upper Body</option>
+                                    <option value="2">Close Up</option>
+                                    <option value="3">Head Hide</option>
+                                    <option value="4">Lower Body</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="control-group">
+                            <h4>Tracking Speed</h4>
+                            <div class="select-control">
+                                <label for="tracking-speed">Speed:</label>
+                                <select id="tracking-speed">
+                                    <option value="0">Lazy</option>
+                                    <option value="1">Slow</option>
+                                    <option value="2">Standard</option>
+                                    <option value="3">Fast</option>
+                                    <option value="4">Crazy</option>
+                                    <option value="5">Auto</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="control-group">
+                            <h4>Auto Zoom</h4>
+                            <div class="toggle-row">
+                                <label>
+                                    <input type="checkbox" id="auto-zoom">
+                                    Enable Auto Zoom
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="control-group">
+                            <h4>Target Selection</h4>
+                            <div class="button-row">
+                                <button id="select-central" class="btn">Select Central</button>
+                                <button id="select-biggest" class="btn">Select Biggest</button>
+                            </div>
+                            <div class="button-row">
+                                <button id="deselect-target" class="btn btn-secondary">Deselect Target</button>
+                            </div>
+                        </div>
+
+                        <div class="control-group">
+                            <h4>Gesture Control</h4>
+                            <div class="toggle-row">
+                                <label>
+                                    <input type="checkbox" id="gesture-target" data-gesture="0">
+                                    Target Selection
+                                </label>
+                            </div>
+                            <div class="toggle-row">
+                                <label>
+                                    <input type="checkbox" id="gesture-zoom" data-gesture="1">
+                                    Zoom
+                                </label>
+                            </div>
+                            <div class="toggle-row">
+                                <label>
+                                    <input type="checkbox" id="gesture-dynamic-zoom" data-gesture="2">
+                                    Dynamic Zoom
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Presets -->
+                    <div id="tab-presets" class="tab-pane">
+                        <h3>Preset Positions</h3>
+
+                        <div class="control-group">
+                            <h4>Boot Position</h4>
+                            <div class="button-row">
+                                <button id="save-boot-position" class="btn">Save Current as Boot</button>
+                                <button id="goto-boot-position" class="btn">Go to Boot Position</button>
+                            </div>
+                        </div>
+
+                        <div class="control-group">
+                            <h4>Custom Presets</h4>
+                            <div class="button-row">
+                                <button id="add-preset" class="btn">Add Current Position</button>
+                            </div>
+                            <div id="preset-list" class="preset-list">
+                                <p class="empty-message">No presets saved</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+        </main>
+
+        <!-- Status bar -->
+        <footer class="status-bar">
+            <span id="connection-status">Disconnected</span>
+            <span id="device-info"></span>
+        </footer>
+    </div>
+
+    <script type="module" src="./main.ts"></script>
+</body>
+</html>
