@@ -43,18 +43,18 @@ function createWindow() {
 
 // Initialize SDK when app is ready
 app.whenReady().then(async () => {
+    createWindow();
+
     if (obsbot) {
         obsbot.initialize((event: { serialNumber: string; connected: boolean }) => {
             if (mainWindow) {
                 mainWindow.webContents.send('device-changed', event);
             }
         });
-
-        // Wait longer for device detection to stabilize
-        obsbot.waitForDevices(5000);
+        
+        // Removed blocking waitForDevices(5000) to prevent startup delay.
+        // The renderer will poll or receive events.
     }
-
-    createWindow();
 
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) {

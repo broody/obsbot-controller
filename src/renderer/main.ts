@@ -204,6 +204,13 @@ async function init() {
 
     // Initialize audio visualizer
     initAudioVisualizer();
+
+    // Hide loading overlay
+    const overlay = document.getElementById('loading-overlay');
+    if (overlay) {
+        overlay.classList.add('opacity-0', 'pointer-events-none');
+        setTimeout(() => overlay.remove(), 500);
+    }
 }
 
 async function refreshDevices() {
