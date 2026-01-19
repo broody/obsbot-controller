@@ -201,6 +201,9 @@ async function init() {
 
     // Set up event listeners
     setupEventListeners();
+
+    // Initialize audio visualizer
+    initAudioVisualizer();
 }
 
 async function refreshDevices() {
@@ -212,7 +215,11 @@ async function refreshDevices() {
     if (devices.length === 0) {
         deviceSelect.innerHTML = '<option value="">No device connected</option>';
         connectionStatus.textContent = 'No devices found';
-        connectionStatus.classList.remove('connected');
+        const statusDot = document.getElementById('connection-status-dot');
+        if (statusDot) {
+            statusDot.classList.remove('bg-emerald-500', 'status-dot');
+            statusDot.classList.add('bg-zinc-600');
+        }
         return;
     }
 
@@ -237,10 +244,15 @@ function delay(ms: number): Promise<void> {
 }
 
 async function selectDevice(serialNumber: string) {
+    const statusDot = document.getElementById('connection-status-dot');
+
     if (!serialNumber) {
         currentDevice = null;
         connectionStatus.textContent = 'Disconnected';
-        connectionStatus.classList.remove('connected');
+        if (statusDot) {
+            statusDot.classList.remove('bg-emerald-500', 'status-dot');
+            statusDot.classList.add('bg-zinc-600');
+        }
         deviceInfo.textContent = '';
         stopGimbalPolling();
         return;
@@ -250,7 +262,10 @@ async function selectDevice(serialNumber: string) {
 
     if (currentDevice) {
         connectionStatus.textContent = 'Connected';
-        connectionStatus.classList.add('connected');
+        if (statusDot) {
+            statusDot.classList.remove('bg-zinc-600', 'bg-red-500');
+            statusDot.classList.add('bg-emerald-500', 'status-dot');
+        }
         deviceInfo.textContent = `${currentDevice.name} v${currentDevice.version}`;
 
         // Wait a bit for device to stabilize before querying settings
@@ -564,7 +579,13 @@ function setupJoystick() {
 
         // Calculate speed values (-1 to 1)
         const panSpeed = dx / maxDistance;
-        const pitchSpeed = -dy / maxDistance;
+        let pitchSpeed = -dy / maxDistance;
+
+        // Invert Y-axis if checkbox is checked
+        const invertY = (document.getElementById('invert-y-axis') as HTMLInputElement)?.checked;
+        if (invertY) {
+            pitchSpeed = -pitchSpeed;
+        }
 
         // Send to gimbal
         window.obsbot.gimbal.setSpeed(pitchSpeed * 50, panSpeed * 50, 0);
@@ -617,15 +638,23 @@ function setupJoystick() {
 
 function setupEventListeners() {
     // Tab switching
-    document.querySelectorAll('.tab').forEach((tab) => {
-        tab.addEventListener('click', () => {
-            const tabId = (tab as HTMLButtonElement).dataset.tab;
+    document.querySelectorAll('.tab-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const targetId = (btn as HTMLButtonElement).dataset.target;
 
-            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-            document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+            // Update buttons
+            document.querySelectorAll('.tab-btn').forEach(b => {
+                b.classList.remove('active', 'text-white', 'bg-white/5');
+                b.classList.add('text-zinc-500');
+            });
+            btn.classList.add('active', 'text-white', 'bg-white/5');
+            btn.classList.remove('text-zinc-500');
 
-            tab.classList.add('active');
-            document.getElementById(`tab-${tabId}`)?.classList.add('active');
+            // Update content
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
+            if (targetId) {
+                document.getElementById(targetId)?.classList.remove('hidden');
+            }
         });
     });
 
@@ -827,11 +856,13 @@ async function initAudioVisualizer() {
         if (audioEnabled) {
             stopAudioVisualizer();
             toggleBtn.textContent = 'Enable Mic';
-            toggleBtn.classList.remove('active');
+            toggleBtn.classList.remove('bg-red-500/20', 'text-red-400', 'border-red-500/50');
+            toggleBtn.classList.add('bg-white/5', 'border-white/10');
         } else {
             await startAudioVisualizer(canvas, levelBar, levelValue);
             toggleBtn.textContent = 'Disable Mic';
-            toggleBtn.classList.add('active');
+            toggleBtn.classList.remove('bg-white/5', 'border-white/10');
+            toggleBtn.classList.add('bg-red-500/20', 'text-red-400', 'border-red-500/50');
         }
     });
 
@@ -843,7 +874,8 @@ async function initAudioVisualizer() {
     try {
         await startAudioVisualizer(canvas, levelBar, levelValue);
         toggleBtn.textContent = 'Disable Mic';
-        toggleBtn.classList.add('active');
+        toggleBtn.classList.remove('bg-white/5', 'border-white/10');
+        toggleBtn.classList.add('bg-red-500/20', 'text-red-400', 'border-red-500/50');
     } catch (error) {
         console.warn('Failed to auto-start mic:', error);
     }
@@ -858,22 +890,35 @@ async function startAudioVisualizer(
         // Get available audio devices
         const devices = await navigator.mediaDevices.enumerateDevices();
         const audioDevices = devices.filter(d => d.kind === 'audioinput');
+        console.log('DEBUG: Available audio devices:', audioDevices);
 
         // Find the OBSBOT device mic
         const obsbotMic = audioDevices.find(d =>
             d.label.toLowerCase().includes('obsbot') ||
             (currentDevice && d.label.toLowerCase().includes(currentDevice.name.toLowerCase()))
         );
+        console.log('DEBUG: Selected OBSBOT mic:', obsbotMic);
 
         const constraints: MediaStreamConstraints = {
             audio: obsbotMic ? { deviceId: { exact: obsbotMic.deviceId } } : true,
             video: false
         };
+        console.log('DEBUG: Using constraints:', constraints);
 
-        audioStream = await navigator.mediaDevices.getUserMedia(constraints);
+        try {
+            audioStream = await navigator.mediaDevices.getUserMedia(constraints);
+        } catch (e) {
+            console.warn('DEBUG: Failed to get specific mic, trying fallback:', e);
+            // Fallback to default
+            audioStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        }
+        console.log('DEBUG: Audio stream started successfully');
 
         // Create audio context and analyser
         audioContext = new AudioContext();
+        if (audioContext.state === 'suspended') {
+            await audioContext.resume();
+        }
         audioAnalyser = audioContext.createAnalyser();
         audioAnalyser.fftSize = 256;
         audioAnalyser.smoothingTimeConstant = 0.8;
@@ -889,6 +934,7 @@ async function startAudioVisualizer(
         const dataArray = new Uint8Array(bufferLength);
         const timeDataArray = new Uint8Array(bufferLength);
 
+        let frameCount = 0;
         function draw() {
             if (!audioEnabled || !audioAnalyser) return;
 
@@ -897,6 +943,12 @@ async function startAudioVisualizer(
             // Get frequency and time domain data
             audioAnalyser.getByteFrequencyData(dataArray);
             audioAnalyser.getByteTimeDomainData(timeDataArray);
+
+            frameCount++;
+            if (frameCount % 120 === 0) {
+                 const max = Math.max(...dataArray);
+                 if (max === 0) console.log(`DEBUG: Silence detected. Context state: ${audioContext?.state}`);
+            }
 
             // Clear canvas
             const width = canvas.width = canvas.offsetWidth;
@@ -924,7 +976,7 @@ async function startAudioVisualizer(
         draw();
     } catch (error) {
         console.error('Failed to start audio visualizer:', error);
-        alert('Failed to access microphone. Make sure the device is not in use by another application.');
+        alert('Failed to access microphone. ' + (error instanceof Error ? error.message : String(error)));
     }
 }
 
@@ -1189,9 +1241,6 @@ async function stopRecording() {
 
 // Start the app
 init().catch(console.error);
-
-// Initialize audio visualizer
-initAudioVisualizer();
 
 // Initialize recording
 setupRecording();

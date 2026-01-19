@@ -3,382 +3,503 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; media-src 'self' blob:;">
+    <!-- CSP adjusted to allow Tailwind CDN for this prototype -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://unpkg.com https://fonts.googleapis.com https://fonts.gstatic.com https://images.unsplash.com blob:;">
     <title>OBSBOT Controller</title>
-    <link rel="stylesheet" href="./styles.css">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #0a0a0c;
+            --accent: #3b82f6;
+            --success: #10b981;
+            --warning: #f59e0b;
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0a0a0c;
+            color: #f4f4f5;
+        }
+        .glass {
+            background: rgba(23, 23, 26, 0.7);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .sidebar-item.active {
+            background: rgba(255, 255, 255, 0.05);
+            border-left: 3px solid #3b82f6;
+            color: #3b82f6;
+        }
+        input[type="range"] {
+            -webkit-appearance: none;
+            height: 4px;
+            background: #27272a;
+            border-radius: 2px;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: #3b82f6;
+            cursor: pointer;
+            box-shadow: 0 0 10px rgba(59, 130, 246, 0.5);
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 5px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #27272a;
+            border-radius: 10px;
+        }
+        .status-dot {
+            box-shadow: 0 0 8px currentColor;
+        }
+        
+        /* Specific styles for functionality from old CSS */
+        .level-bar::after {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 0;
+            height: 100%;
+            width: var(--level, 0%);
+            background: linear-gradient(90deg, #4ecca3 0%, #ffc107 70%, #e94560 100%);
+            border-radius: 4px;
+            transition: width 0.05s ease-out;
+        }
+        .btn-record.recording {
+            color: #ef4444;
+            animation: pulse-recording 1.5s ease-in-out infinite;
+        }
+        @keyframes pulse-recording {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+    </style>
 </head>
-<body>
-    <div class="app">
-        <!-- Header -->
-        <header class="header">
-            <h1>OBSBOT Controller</h1>
-            <div class="device-selector">
-                <label for="device-select">Device:</label>
-                <select id="device-select">
-                    <option value="">No device connected</option>
-                </select>
-                <button id="refresh-devices" class="btn btn-icon" title="Refresh devices">↻</button>
+<body class="h-screen flex flex-col overflow-hidden">
+    <!-- Main Content -->
+    <main class="flex-1 flex flex-col relative overflow-hidden">
+        <!-- Top Header -->
+        <header class="h-16 border-b border-white/5 flex items-center justify-between px-8 z-10 bg-black/20 backdrop-blur-md">
+            <div class="flex items-center gap-6">
+                 <!-- Logo/Title -->
+                <div class="flex items-center gap-2 mr-2">
+                     <div class="w-6 h-6 bg-blue-600 rounded-lg flex items-center justify-center">
+                        <i data-lucide="camera" class="w-3 h-3 text-white"></i>
+                    </div>
+                    <span class="font-bold text-sm tracking-tight">OBSBOT</span>
+                </div>
+
+                <div class="flex items-center gap-2 px-3 py-1.5 bg-zinc-900 rounded-full border border-white/5">
+                    <div class="w-2 h-2 rounded-full bg-emerald-500 status-dot"></div>
+                    <span class="text-xs font-medium text-zinc-300">Live Preview</span>
+                </div>
+
+                <!-- Device Selector -->
+                <div class="h-6 w-[1px] bg-white/10 mx-2"></div>
+                
+                <div class="flex items-center gap-3">
+                     <div class="flex gap-2 items-center">
+                        <select id="device-select" class="bg-black/20 border border-white/10 rounded-md px-2 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-blue-500 min-w-[180px]">
+                            <option value="">No device</option>
+                        </select>
+                        <button id="refresh-devices" class="p-1.5 bg-white/5 hover:bg-white/10 rounded-md border border-white/10 transition-colors">
+                            <i data-lucide="refresh-cw" class="w-3 h-3 text-zinc-400"></i>
+                        </button>
+                    </div>
+                     <div class="flex items-center gap-2">
+                        <div id="connection-status-dot" class="w-2 h-2 rounded-full bg-zinc-600"></div>
+                        <span id="connection-status" class="hidden">Disconnected</span>
+                    </div>
+                     <span id="device-info" class="text-[10px] text-zinc-500"></span>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-3">
+                <button id="start-preview" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 rounded-md text-xs font-medium transition-colors">Start Preview</button>
+                <button id="stop-preview" class="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 rounded-md text-xs font-medium transition-colors text-zinc-300">Stop</button>
             </div>
         </header>
 
-        <!-- Main content -->
-        <main class="main">
-            <!-- Video preview -->
-            <section class="video-section">
-                <div class="video-container">
-                    <video id="video-preview" autoplay playsinline></video>
-                    <div id="video-placeholder" class="video-placeholder">
-                        <span>Connect a device to see preview</span>
-                    </div>
-                </div>
-                <div class="video-controls">
-                    <button id="start-preview" class="btn">Start Preview</button>
-                    <button id="stop-preview" class="btn">Stop Preview</button>
-                    <button id="record-btn" class="btn btn-record">Record</button>
-                    <span id="record-timer" class="record-timer hidden">00:00</span>
-                </div>
-
-                <!-- Audio Visualizer -->
-                <div class="audio-visualizer-section">
-                    <div class="visualizer-header">
-                        <h4>Audio Input</h4>
-                        <div class="visualizer-controls">
-                            <button id="toggle-audio" class="btn btn-small active">Disable Mic</button>
-                            <select id="visualizer-type">
-                                <option value="bars">Frequency Bars</option>
-                                <option value="waveform">Waveform</option>
-                                <option value="circular">Circular</option>
-                            </select>
+        <div class="flex-1 flex overflow-hidden p-6 gap-6">
+            <!-- Left Side: Preview -->
+            <div class="flex-[1.5] flex flex-col gap-6">
+                <!-- Video Preview Card -->
+                <div class="relative flex-1 rounded-3xl overflow-hidden glass shadow-2xl group border border-white/10 flex flex-col">
+                    <div class="relative flex-1 bg-black flex items-center justify-center overflow-hidden">
+                        <video id="video-preview" class="w-full h-full object-contain" autoplay playsinline></video>
+                        <div id="video-placeholder" class="absolute inset-0 flex items-center justify-center text-zinc-500 gap-2">
+                            <i data-lucide="video-off" class="w-6 h-6"></i>
+                            <span>No Signal</span>
                         </div>
                     </div>
-                    <div class="visualizer-container">
-                        <canvas id="audio-visualizer"></canvas>
-                        <div id="audio-level" class="audio-level">
-                            <div class="level-bar"></div>
-                            <span class="level-value">-∞ dB</span>
-                        </div>
+
+                    <!-- Overlay Controls Bottom -->
+                    <div class="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-6 px-8 py-4 bg-black/40 backdrop-blur-xl rounded-2xl border border-white/10">
+                        <button id="record-btn" class="btn-record flex flex-col items-center gap-1 text-zinc-400 hover:text-white transition-colors">
+                            <i data-lucide="disc" class="w-5 h-5"></i>
+                            <span class="text-[10px]">Record</span>
+                        </button>
+                        <div class="w-[1px] h-8 bg-white/10"></div>
+                        <span id="record-timer" class="text-xs font-mono text-red-500 hidden">00:00</span>
                     </div>
                 </div>
-            </section>
+            </div>
 
-            <!-- Controls panel -->
-            <aside class="controls-panel">
-                <!-- Tabs -->
-                <div class="tabs">
-                    <button class="tab active" data-tab="gimbal">Gimbal</button>
-                    <button class="tab" data-tab="camera">Camera</button>
-                    <button class="tab" data-tab="ai">AI</button>
-                    <button class="tab" data-tab="presets">Presets</button>
-                </div>
+            <!-- Right Side: Controls -->
+            <div class="flex-1 flex flex-col gap-6 max-w-sm">
+                <div class="flex-1 glass rounded-3xl border border-white/10 flex flex-col overflow-hidden">
+                    <!-- Tabs -->
+                    <div class="flex border-b border-white/5 p-1 bg-black/20">
+                        <button id="tab-controls-btn" class="tab-btn active flex-1 py-2.5 text-xs font-semibold text-white bg-white/5 rounded-2xl transition-all" data-target="tab-controls">Controls</button>
+                        <button id="tab-image-btn" class="tab-btn flex-1 py-2.5 text-xs font-semibold text-zinc-500 hover:text-zinc-300 transition-all" data-target="tab-image">Image</button>
+                        <button id="tab-audio-btn" class="tab-btn flex-1 py-2.5 text-xs font-semibold text-zinc-500 hover:text-zinc-300 transition-all" data-target="tab-audio">Audio</button>
+                    </div>
 
-                <!-- Tab content -->
-                <div class="tab-content">
-                    <!-- Gimbal Controls -->
-                    <div id="tab-gimbal" class="tab-pane active">
-                        <h3>Gimbal Control</h3>
-
-                        <div class="control-group">
-                            <h4>Position Control</h4>
-                            <div class="gimbal-joystick">
-                                <div id="joystick-container" class="joystick-container">
-                                    <div id="joystick" class="joystick"></div>
+                    <!-- Scrollable Content -->
+                    <div class="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-8 relative">
+                        
+                        <!-- CONTROLS TAB -->
+                        <div id="tab-controls" class="tab-content space-y-8">
+                            <!-- Gimbal Control -->
+                            <section>
+                                <div class="flex items-center justify-between mb-4">
+                                    <h3 class="text-sm font-semibold text-zinc-200">Gimbal</h3>
+                                    <div class="flex gap-2">
+                                        <button id="gimbal-reset" class="text-[10px] text-blue-400 font-bold uppercase hover:underline">Reset</button>
+                                        <button id="gimbal-stop" class="text-[10px] text-red-400 font-bold uppercase hover:underline">Stop</button>
+                                    </div>
                                 </div>
-                                <p class="help-text">Drag to move gimbal</p>
-                            </div>
-
-                            <div class="gimbal-state">
-                                <div class="state-row">
-                                    <span>Pitch:</span>
-                                    <span id="gimbal-pitch">0.0°</span>
+                                
+                                <div class="mb-2 flex justify-center">
+                                    <label class="flex items-center gap-2">
+                                        <input type="checkbox" id="invert-y-axis" class="rounded bg-zinc-700 border-zinc-600 text-blue-600">
+                                        <span class="text-[10px] text-zinc-400 font-medium uppercase">Invert Y-Axis</span>
+                                    </label>
                                 </div>
-                                <div class="state-row">
-                                    <span>Yaw:</span>
-                                    <span id="gimbal-yaw">0.0°</span>
+
+                                <div class="relative w-48 h-48 mx-auto mb-6">
+                                    <div id="joystick-container" class="absolute inset-0 rounded-full border-2 border-dashed border-white/5 flex items-center justify-center cursor-move">
+                                        <div class="w-40 h-40 rounded-full bg-white/[0.02] border border-white/10 shadow-inner flex items-center justify-center relative">
+                                            <div id="joystick" class="w-12 h-12 rounded-full bg-blue-600 shadow-[0_0_20px_rgba(59,130,246,0.5)] absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none"></div>
+                                        </div>
+                                    </div>
+                                    <span class="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-6 text-[10px] text-zinc-500 font-bold uppercase">Tilt</span>
+                                    <span class="absolute -right-8 top-1/2 -translate-y-1/2 text-[10px] text-zinc-500 font-bold uppercase rotate-90">Pan</span>
                                 </div>
-                            </div>
+
+                                <div class="grid grid-cols-2 gap-4">
+                                    <div class="bg-black/30 rounded-xl p-3 border border-white/5">
+                                        <div class="text-[10px] text-zinc-500 font-bold uppercase mb-1">Pan</div>
+                                        <div id="gimbal-yaw" class="text-lg font-mono">0.0°</div>
+                                    </div>
+                                    <div class="bg-black/30 rounded-xl p-3 border border-white/5">
+                                        <div class="text-[10px] text-zinc-500 font-bold uppercase mb-1">Tilt</div>
+                                        <div id="gimbal-pitch" class="text-lg font-mono">0.0°</div>
+                                    </div>
+                                </div>
+                            </section>
+
+                            <!-- AI Tracking -->
+                            <section>
+                                <div class="flex items-center justify-between mb-4">
+                                    <h3 class="text-sm font-semibold text-zinc-200">AI Tracking</h3>
+                                    <label class="relative inline-flex items-center cursor-pointer">
+                                        <input type="checkbox" id="ai-enabled" class="sr-only peer">
+                                        <div class="w-9 h-5 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                                    </label>
+                                </div>
+
+                                <div class="space-y-4">
+                                    <div class="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label class="text-[10px] text-zinc-500 uppercase font-bold block mb-1">Mode</label>
+                                            <select id="ai-mode" class="w-full bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-zinc-200">
+                                                <option value="0">Off</option>
+                                                <option value="1">Group</option>
+                                                <option value="2">Human</option>
+                                                <option value="3">Hand</option>
+                                                <option value="4">Whiteboard</option>
+                                                <option value="5">Desk</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label class="text-[10px] text-zinc-500 uppercase font-bold block mb-1">Sub-mode</label>
+                                            <select id="ai-submode" class="w-full bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-zinc-200">
+                                                <option value="0">Normal</option>
+                                                <option value="1">Upper Body</option>
+                                                <option value="2">Close Up</option>
+                                                <option value="3">Head Hide</option>
+                                                <option value="4">Lower Body</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    
+                                    <div>
+                                        <label class="text-[10px] text-zinc-500 uppercase font-bold block mb-1">Speed</label>
+                                        <select id="tracking-speed" class="w-full bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-zinc-200">
+                                            <option value="0">Lazy</option>
+                                            <option value="1">Slow</option>
+                                            <option value="2">Standard</option>
+                                            <option value="3">Fast</option>
+                                            <option value="4">Crazy</option>
+                                            <option value="5">Auto</option>
+                                        </select>
+                                    </div>
+
+                                    <div class="flex items-center gap-2">
+                                        <input type="checkbox" id="auto-zoom" class="rounded bg-zinc-700 border-zinc-600 text-blue-600 focus:ring-blue-600">
+                                        <label for="auto-zoom" class="text-xs text-zinc-300">Auto Zoom</label>
+                                    </div>
+                                    
+                                    <div class="grid grid-cols-2 gap-2">
+                                        <button id="select-central" class="py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-[10px]">Select Central</button>
+                                        <button id="select-biggest" class="py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-[10px]">Select Biggest</button>
+                                    </div>
+                                    <button id="deselect-target" class="w-full py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-[10px] text-zinc-400">Deselect Target</button>
+
+                                    <!-- Gestures -->
+                                    <div class="space-y-2 pt-2 border-t border-white/5">
+                                        <label class="text-[10px] text-zinc-500 uppercase font-bold block">Gestures</label>
+                                        <label class="flex items-center gap-2">
+                                            <input type="checkbox" id="gesture-target" data-gesture="0" class="rounded bg-zinc-700 border-zinc-600 text-blue-600">
+                                            <span class="text-xs text-zinc-300">Target Select</span>
+                                        </label>
+                                        <label class="flex items-center gap-2">
+                                            <input type="checkbox" id="gesture-zoom" data-gesture="1" class="rounded bg-zinc-700 border-zinc-600 text-blue-600">
+                                            <span class="text-xs text-zinc-300">Zoom</span>
+                                        </label>
+                                        <label class="flex items-center gap-2">
+                                            <input type="checkbox" id="gesture-dynamic-zoom" data-gesture="2" class="rounded bg-zinc-700 border-zinc-600 text-blue-600">
+                                            <span class="text-xs text-zinc-300">Dynamic Zoom</span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </section>
+
+                            <!-- Presets -->
+                            <section>
+                                <h3 class="text-sm font-semibold text-zinc-200 mb-4">Presets</h3>
+                                <div class="grid grid-cols-2 gap-2 mb-4">
+                                    <button id="save-boot-position" class="py-2 bg-white/5 rounded-lg text-[10px] font-medium border border-white/10 hover:bg-white/10">Save Boot Pos</button>
+                                    <button id="goto-boot-position" class="py-2 bg-white/5 rounded-lg text-[10px] font-medium border border-white/10 hover:bg-white/10">Go to Boot</button>
+                                </div>
+                                
+                                <button id="add-preset" class="w-full mb-3 p-2 border-2 border-dashed border-white/10 rounded-xl text-[11px] font-medium text-zinc-500 flex items-center justify-center gap-2 hover:border-white/20 hover:text-zinc-400 transition-all">
+                                    <i data-lucide="plus" class="w-3 h-3"></i> Add Current Position
+                                </button>
+                                
+                                <div id="preset-list" class="space-y-2 max-h-40 overflow-y-auto custom-scrollbar">
+                                    <!-- Presets will be injected here -->
+                                    <p class="text-[10px] text-zinc-500 text-center py-2 empty-message">No presets</p>
+                                </div>
+                            </section>
                         </div>
 
-                        <div class="control-group">
-                            <h4>Quick Actions</h4>
-                            <div class="button-row">
-                                <button id="gimbal-reset" class="btn">Reset Position</button>
-                                <button id="gimbal-stop" class="btn">Stop</button>
-                            </div>
-                        </div>
-                    </div>
+                        <!-- IMAGE TAB -->
+                        <div id="tab-image" class="tab-content hidden space-y-8">
+                             <!-- Zoom -->
+                            <section>
+                                <div class="flex justify-between text-sm font-semibold text-zinc-200 mb-2">
+                                    <span>Zoom</span>
+                                    <span id="zoom-value" class="text-blue-400 font-mono">1.0x</span>
+                                </div>
+                                <input type="range" id="zoom-slider" class="w-full" min="100" max="400" value="100">
+                            </section>
 
-                    <!-- Camera Controls -->
-                    <div id="tab-camera" class="tab-pane">
-                        <h3>Camera Settings</h3>
+                            <!-- Focus -->
+                            <section>
+                                <h3 class="text-sm font-semibold text-zinc-200 mb-4">Focus</h3>
+                                <div class="space-y-4">
+                                    <select id="focus-mode" class="w-full bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-zinc-200">
+                                        <option value="0">Auto Select</option>
+                                        <option value="1">Continuous (AFC)</option>
+                                        <option value="2">Single (AFS)</option>
+                                        <option value="3">Manual (MF)</option>
+                                    </select>
+                                    
+                                    <div class="flex items-center gap-2">
+                                        <input type="checkbox" id="face-focus" class="rounded bg-zinc-700 border-zinc-600 text-blue-600">
+                                        <label for="face-focus" class="text-xs text-zinc-300">Face Priority</label>
+                                    </div>
 
-                        <div class="control-group">
-                            <h4>Zoom</h4>
-                            <div class="slider-control">
-                                <input type="range" id="zoom-slider" min="100" max="400" value="100">
-                                <span id="zoom-value">1.0x</span>
-                            </div>
-                        </div>
+                                    <div id="manual-focus-control" class="hidden">
+                                        <div class="flex justify-between text-[11px] text-zinc-400 mb-1">
+                                            <span>Manual Focus</span>
+                                            <span id="focus-value">50</span>
+                                        </div>
+                                        <input type="range" id="focus-slider" class="w-full" min="0" max="100" value="50">
+                                    </div>
+                                </div>
+                            </section>
 
-                        <div class="control-group">
-                            <h4>Focus</h4>
-                            <div class="select-control">
-                                <label for="focus-mode">Mode:</label>
-                                <select id="focus-mode">
-                                    <option value="0">Auto Select</option>
-                                    <option value="1">Continuous (AFC)</option>
-                                    <option value="2">Single (AFS)</option>
-                                    <option value="3">Manual (MF)</option>
-                                </select>
-                            </div>
-                            <div class="toggle-row">
-                                <label>
-                                    <input type="checkbox" id="face-focus">
-                                    Face Priority
-                                </label>
-                            </div>
-                            <div class="slider-control" id="manual-focus-control">
-                                <label>Manual Focus</label>
-                                <input type="range" id="focus-slider" min="0" max="100" value="50">
-                                <span id="focus-value">50</span>
-                            </div>
-                        </div>
+                            <!-- Exposure -->
+                            <section>
+                                <h3 class="text-sm font-semibold text-zinc-200 mb-4">Exposure</h3>
+                                <div class="space-y-4">
+                                    <select id="exposure-mode" class="w-full bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-zinc-200">
+                                        <option value="1">Auto</option>
+                                        <option value="2">Manual</option>
+                                        <option value="4">Shutter Priority</option>
+                                        <option value="8">Aperture Priority</option>
+                                    </select>
+                                    
+                                    <div>
+                                        <div class="flex justify-between text-[11px] text-zinc-400 mb-1">
+                                            <span>EV</span>
+                                            <span id="exposure-value">0</span>
+                                        </div>
+                                        <input type="range" id="exposure-slider" class="w-full" min="-10" max="10" value="0">
+                                    </div>
 
-                        <div class="control-group">
-                            <h4>Exposure</h4>
-                            <div class="select-control">
-                                <label for="exposure-mode">Mode:</label>
-                                <select id="exposure-mode">
-                                    <option value="1">Auto</option>
-                                    <option value="2">Manual</option>
-                                    <option value="4">Shutter Priority</option>
-                                    <option value="8">Aperture Priority</option>
-                                </select>
-                            </div>
-                            <div class="slider-control">
-                                <label>Exposure Value</label>
-                                <input type="range" id="exposure-slider" min="-10" max="10" value="0">
-                                <span id="exposure-value">0</span>
-                            </div>
-                            <div class="toggle-row">
-                                <label>
-                                    <input type="checkbox" id="ae-lock">
-                                    AE Lock
-                                </label>
-                            </div>
-                        </div>
+                                    <div class="flex items-center gap-2">
+                                        <input type="checkbox" id="ae-lock" class="rounded bg-zinc-700 border-zinc-600 text-blue-600">
+                                        <label for="ae-lock" class="text-xs text-zinc-300">AE Lock</label>
+                                    </div>
+                                </div>
+                            </section>
 
-                        <div class="control-group">
-                            <h4>White Balance</h4>
-                            <div class="select-control">
-                                <label for="wb-mode">Mode:</label>
-                                <select id="wb-mode">
-                                    <option value="0">Auto</option>
-                                    <option value="1">Manual</option>
-                                    <option value="2">Sunny</option>
-                                    <option value="3">Cloudy</option>
-                                    <option value="4">Shade</option>
-                                    <option value="5">Incandescent</option>
-                                    <option value="6">Fluorescent</option>
-                                </select>
-                            </div>
-                            <div class="slider-control" id="wb-manual-control" style="display: none;">
-                                <label>Temperature</label>
-                                <input type="range" id="wb-slider" min="2800" max="6500" value="5600">
-                                <span id="wb-value">5600K</span>
-                            </div>
-                        </div>
+                            <!-- White Balance -->
+                            <section>
+                                <h3 class="text-sm font-semibold text-zinc-200 mb-4">White Balance</h3>
+                                <div class="space-y-4">
+                                    <select id="wb-mode" class="w-full bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-zinc-200">
+                                        <option value="0">Auto</option>
+                                        <option value="1">Manual</option>
+                                        <option value="2">Sunny</option>
+                                        <option value="3">Cloudy</option>
+                                        <option value="4">Shade</option>
+                                        <option value="5">Incandescent</option>
+                                        <option value="6">Fluorescent</option>
+                                    </select>
 
-                        <div class="control-group">
-                            <h4>Image Adjustments</h4>
-                            <div class="slider-control">
-                                <label>Brightness</label>
-                                <input type="range" id="brightness-slider" min="-100" max="100" value="0">
-                                <span id="brightness-value">0</span>
-                            </div>
-                            <div class="slider-control">
-                                <label>Contrast</label>
-                                <input type="range" id="contrast-slider" min="-100" max="100" value="0">
-                                <span id="contrast-value">0</span>
-                            </div>
-                            <div class="slider-control">
-                                <label>Saturation</label>
-                                <input type="range" id="saturation-slider" min="-100" max="100" value="0">
-                                <span id="saturation-value">0</span>
-                            </div>
-                            <div class="slider-control">
-                                <label>Sharpness</label>
-                                <input type="range" id="sharpness-slider" min="0" max="100" value="50">
-                                <span id="sharpness-value">50</span>
-                            </div>
-                        </div>
+                                    <div id="wb-manual-control" class="hidden">
+                                        <div class="flex justify-between text-[11px] text-zinc-400 mb-1">
+                                            <span>Temp</span>
+                                            <span id="wb-value">5600K</span>
+                                        </div>
+                                        <input type="range" id="wb-slider" class="w-full" min="2800" max="6500" value="5600">
+                                    </div>
+                                </div>
+                            </section>
 
-                        <div class="control-group">
-                            <h4>HDR / WDR</h4>
-                            <div class="select-control">
-                                <label for="hdr-mode">Mode:</label>
-                                <select id="hdr-mode">
+                            <!-- Image Adjustments -->
+                            <section>
+                                <h3 class="text-sm font-semibold text-zinc-200 mb-4">Image Adjustments</h3>
+                                <div class="space-y-4">
+                                    <div class="space-y-1">
+                                        <div class="flex justify-between text-[11px] text-zinc-400">
+                                            <span>Brightness</span>
+                                            <span id="brightness-value" class="text-blue-400">0</span>
+                                        </div>
+                                        <input type="range" id="brightness-slider" class="w-full" min="-100" max="100" value="0">
+                                    </div>
+                                    <div class="space-y-1">
+                                        <div class="flex justify-between text-[11px] text-zinc-400">
+                                            <span>Contrast</span>
+                                            <span id="contrast-value" class="text-blue-400">0</span>
+                                        </div>
+                                        <input type="range" id="contrast-slider" class="w-full" min="-100" max="100" value="0">
+                                    </div>
+                                    <div class="space-y-1">
+                                        <div class="flex justify-between text-[11px] text-zinc-400">
+                                            <span>Saturation</span>
+                                            <span id="saturation-value" class="text-blue-400">0</span>
+                                        </div>
+                                        <input type="range" id="saturation-slider" class="w-full" min="-100" max="100" value="0">
+                                    </div>
+                                    <div class="space-y-1">
+                                        <div class="flex justify-between text-[11px] text-zinc-400">
+                                            <span>Sharpness</span>
+                                            <span id="sharpness-value" class="text-blue-400">50</span>
+                                        </div>
+                                        <input type="range" id="sharpness-slider" class="w-full" min="0" max="100" value="50">
+                                    </div>
+                                </div>
+                            </section>
+
+                            <!-- HDR -->
+                             <section>
+                                <h3 class="text-sm font-semibold text-zinc-200 mb-2">HDR</h3>
+                                <select id="hdr-mode" class="w-full bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-zinc-200">
                                     <option value="0">Off</option>
                                     <option value="1">On</option>
                                 </select>
-                            </div>
+                             </section>
+
+                             <!-- Toggles Groups -->
+                             <section class="space-y-4">
+                                <div>
+                                    <h4 class="text-[10px] text-zinc-500 uppercase font-bold mb-2">Field of View</h4>
+                                    <div class="flex bg-black/40 p-1 rounded-lg">
+                                        <button class="fov-btn flex-1 py-1.5 text-[10px] font-bold text-zinc-400 hover:text-zinc-200 [&.active]:bg-white/10 [&.active]:text-white rounded" data-fov="0">Wide</button>
+                                        <button class="fov-btn flex-1 py-1.5 text-[10px] font-bold text-zinc-400 hover:text-zinc-200 [&.active]:bg-white/10 [&.active]:text-white rounded" data-fov="1">Medium</button>
+                                        <button class="fov-btn flex-1 py-1.5 text-[10px] font-bold text-zinc-400 hover:text-zinc-200 [&.active]:bg-white/10 [&.active]:text-white rounded" data-fov="2">Narrow</button>
+                                    </div>
+                                </div>
+                                
+                                <div>
+                                    <h4 class="text-[10px] text-zinc-500 uppercase font-bold mb-2">Mirror / Flip</h4>
+                                    <div class="flex bg-black/40 p-1 rounded-lg">
+                                        <button class="mirror-btn flex-1 py-1.5 text-[10px] font-bold text-zinc-400 hover:text-zinc-200 [&.active]:bg-white/10 [&.active]:text-white rounded" data-mode="0">Std</button>
+                                        <button class="mirror-btn flex-1 py-1.5 text-[10px] font-bold text-zinc-400 hover:text-zinc-200 [&.active]:bg-white/10 [&.active]:text-white rounded" data-mode="1">H</button>
+                                        <button class="mirror-btn flex-1 py-1.5 text-[10px] font-bold text-zinc-400 hover:text-zinc-200 [&.active]:bg-white/10 [&.active]:text-white rounded" data-mode="2">V</button>
+                                        <button class="mirror-btn flex-1 py-1.5 text-[10px] font-bold text-zinc-400 hover:text-zinc-200 [&.active]:bg-white/10 [&.active]:text-white rounded" data-mode="3">All</button>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <h4 class="text-[10px] text-zinc-500 uppercase font-bold mb-2">Anti-Flicker</h4>
+                                    <div class="flex bg-black/40 p-1 rounded-lg">
+                                        <button class="flicker-btn flex-1 py-1.5 text-[10px] font-bold text-zinc-400 hover:text-zinc-200 [&.active]:bg-white/10 [&.active]:text-white rounded" data-mode="0">Auto</button>
+                                        <button class="flicker-btn flex-1 py-1.5 text-[10px] font-bold text-zinc-400 hover:text-zinc-200 [&.active]:bg-white/10 [&.active]:text-white rounded" data-mode="1">50Hz</button>
+                                        <button class="flicker-btn flex-1 py-1.5 text-[10px] font-bold text-zinc-400 hover:text-zinc-200 [&.active]:bg-white/10 [&.active]:text-white rounded" data-mode="2">60Hz</button>
+                                    </div>
+                                </div>
+                             </section>
                         </div>
 
-                        <div class="control-group">
-                            <h4>Field of View</h4>
-                            <div class="button-group">
-                                <button class="btn fov-btn" data-fov="0">86° Wide</button>
-                                <button class="btn fov-btn" data-fov="1">78° Medium</button>
-                                <button class="btn fov-btn" data-fov="2">65° Narrow</button>
-                            </div>
-                        </div>
-
-                        <div class="control-group">
-                            <h4>Mirror / Flip</h4>
-                            <div class="button-group">
-                                <button class="btn mirror-btn" data-mode="0">Normal</button>
-                                <button class="btn mirror-btn" data-mode="1">H-Flip</button>
-                                <button class="btn mirror-btn" data-mode="2">V-Flip</button>
-                                <button class="btn mirror-btn" data-mode="3">Both</button>
-                            </div>
-                        </div>
-
-                        <div class="control-group">
-                            <h4>Anti-Flicker</h4>
-                            <div class="button-group">
-                                <button class="btn flicker-btn" data-mode="0">Auto</button>
-                                <button class="btn flicker-btn" data-mode="1">50Hz</button>
-                                <button class="btn flicker-btn" data-mode="2">60Hz</button>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- AI Controls -->
-                    <div id="tab-ai" class="tab-pane">
-                        <h3>AI Tracking</h3>
-
-                        <div class="control-group">
-                            <h4>AI Mode</h4>
-                            <div class="toggle-row">
-                                <label>
-                                    <input type="checkbox" id="ai-enabled">
-                                    Enable AI Tracking
-                                </label>
-                            </div>
-                            <div class="select-control">
-                                <label for="ai-mode">Mode:</label>
-                                <select id="ai-mode">
-                                    <option value="0">Off</option>
-                                    <option value="1">Group</option>
-                                    <option value="2">Human</option>
-                                    <option value="3">Hand</option>
-                                    <option value="4">Whiteboard</option>
-                                    <option value="5">Desk</option>
+                        <!-- AUDIO TAB -->
+                        <div id="tab-audio" class="tab-content hidden space-y-8">
+                             <section>
+                                <div class="flex items-center justify-between mb-4">
+                                    <h3 class="text-sm font-semibold text-zinc-200">Microphone Input</h3>
+                                    <button id="toggle-audio" class="text-[10px] px-2 py-1 bg-white/5 border border-white/10 rounded">Enable Mic</button>
+                                </div>
+                                
+                                <select id="visualizer-type" class="w-full mb-4 bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-zinc-200">
+                                    <option value="bars">Frequency Bars</option>
+                                    <option value="waveform">Waveform</option>
+                                    <option value="circular">Circular</option>
                                 </select>
-                            </div>
-                            <div class="select-control" id="ai-submode-control">
-                                <label for="ai-submode">Sub-mode:</label>
-                                <select id="ai-submode">
-                                    <option value="0">Normal</option>
-                                    <option value="1">Upper Body</option>
-                                    <option value="2">Close Up</option>
-                                    <option value="3">Head Hide</option>
-                                    <option value="4">Lower Body</option>
-                                </select>
-                            </div>
-                        </div>
 
-                        <div class="control-group">
-                            <h4>Tracking Speed</h4>
-                            <div class="select-control">
-                                <label for="tracking-speed">Speed:</label>
-                                <select id="tracking-speed">
-                                    <option value="0">Lazy</option>
-                                    <option value="1">Slow</option>
-                                    <option value="2">Standard</option>
-                                    <option value="3">Fast</option>
-                                    <option value="4">Crazy</option>
-                                    <option value="5">Auto</option>
-                                </select>
-                            </div>
-                        </div>
-
-                        <div class="control-group">
-                            <h4>Auto Zoom</h4>
-                            <div class="toggle-row">
-                                <label>
-                                    <input type="checkbox" id="auto-zoom">
-                                    Enable Auto Zoom
-                                </label>
-                            </div>
-                        </div>
-
-                        <div class="control-group">
-                            <h4>Target Selection</h4>
-                            <div class="button-row">
-                                <button id="select-central" class="btn">Select Central</button>
-                                <button id="select-biggest" class="btn">Select Biggest</button>
-                            </div>
-                            <div class="button-row">
-                                <button id="deselect-target" class="btn btn-secondary">Deselect Target</button>
-                            </div>
-                        </div>
-
-                        <div class="control-group">
-                            <h4>Gesture Control</h4>
-                            <div class="toggle-row">
-                                <label>
-                                    <input type="checkbox" id="gesture-target" data-gesture="0">
-                                    Target Selection
-                                </label>
-                            </div>
-                            <div class="toggle-row">
-                                <label>
-                                    <input type="checkbox" id="gesture-zoom" data-gesture="1">
-                                    Zoom
-                                </label>
-                            </div>
-                            <div class="toggle-row">
-                                <label>
-                                    <input type="checkbox" id="gesture-dynamic-zoom" data-gesture="2">
-                                    Dynamic Zoom
-                                </label>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Presets -->
-                    <div id="tab-presets" class="tab-pane">
-                        <h3>Preset Positions</h3>
-
-                        <div class="control-group">
-                            <h4>Boot Position</h4>
-                            <div class="button-row">
-                                <button id="save-boot-position" class="btn">Save Current as Boot</button>
-                                <button id="goto-boot-position" class="btn">Go to Boot Position</button>
-                            </div>
-                        </div>
-
-                        <div class="control-group">
-                            <h4>Custom Presets</h4>
-                            <div class="button-row">
-                                <button id="add-preset" class="btn">Add Current Position</button>
-                            </div>
-                            <div id="preset-list" class="preset-list">
-                                <p class="empty-message">No presets saved</p>
-                            </div>
+                                <div class="bg-black/30 rounded-2xl border border-white/5 p-4">
+                                    <canvas id="audio-visualizer" class="w-full h-24 rounded bg-transparent mb-2"></canvas>
+                                    
+                                    <div id="audio-level" class="audio-level flex items-center gap-2">
+                                        <div class="level-bar flex-1 h-2 bg-zinc-800 rounded-full relative overflow-hidden"></div>
+                                        <span class="level-value text-[10px] font-mono text-zinc-500 w-12 text-right">-∞ dB</span>
+                                    </div>
+                                </div>
+                            </section>
                         </div>
                     </div>
                 </div>
-            </aside>
-        </main>
-
-        <!-- Status bar -->
-        <footer class="status-bar">
-            <span id="connection-status">Disconnected</span>
-            <span id="device-info"></span>
-        </footer>
-    </div>
+            </div>
+        </div>
+    </main>
 
     <script type="module" src="./main.ts"></script>
+    <script>
+        // Init Lucide
+        lucide.createIcons();
+    </script>
 </body>
 </html>
