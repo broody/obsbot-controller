@@ -4,7 +4,8 @@
   "description": "OBSBOT Webcam Controller for Linux",
   "main": "dist/main/index.js",
   "scripts": {
-    "build:native": "node-gyp rebuild",
+    "build:native": "node-gyp build",
+    "build:native:clean": "node-gyp rebuild",
     "build:main": "tsc -p tsconfig.main.json",
     "build:renderer": "vite build",
     "build": "npm run build:native && npm run build:main && npm run build:renderer",

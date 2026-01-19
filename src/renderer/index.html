@@ -20,6 +20,8 @@
             font-family: 'Inter', sans-serif;
             background-color: #0a0a0c;
             color: #f4f4f5;
+            user-select: none;
+            -webkit-user-select: none;
         }
         .glass {
             background: rgba(23, 23, 26, 0.7);
@@ -100,6 +102,7 @@
                 <div class="flex items-center gap-2 px-3 py-1.5 bg-zinc-900 rounded-full border border-white/5">
                     <div class="w-2 h-2 rounded-full bg-emerald-500 status-dot"></div>
                     <span class="text-xs font-medium text-zinc-300">Live Preview</span>
+                    <span id="video-resolution" class="text-[10px] text-zinc-500 font-mono ml-1 border-l border-white/10 pl-2"></span>
                 </div>
 
                 <!-- Device Selector -->

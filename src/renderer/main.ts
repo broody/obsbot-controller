@@ -526,13 +526,25 @@ async function startVideoPreview() {
         );
 
         const constraints: MediaStreamConstraints = {
-            video: obsbotDevice ? { deviceId: { exact: obsbotDevice.deviceId } } : true,
+            video: {
+                deviceId: obsbotDevice ? { exact: obsbotDevice.deviceId } : undefined,
+                width: { ideal: 3840 },
+                height: { ideal: 2160 }
+            },
             audio: false
         };
 
         videoStream = await navigator.mediaDevices.getUserMedia(constraints);
         videoPreview.srcObject = videoStream;
         videoPlaceholder.classList.add('hidden');
+
+        // Display resolution
+        videoPreview.onloadedmetadata = () => {
+            const resEl = document.getElementById('video-resolution');
+            if (resEl) {
+                resEl.textContent = `${videoPreview.videoWidth}x${videoPreview.videoHeight}`;
+            }
+        };
     } catch (error) {
         console.error('Failed to start video preview:', error);
         alert('Failed to access webcam. Make sure the device is not in use by another application.');
@@ -546,6 +558,9 @@ function stopVideoPreview() {
     }
     videoPreview.srcObject = null;
     videoPlaceholder.classList.remove('hidden');
+
+    const resEl = document.getElementById('video-resolution');
+    if (resEl) resEl.textContent = '';
 }
 
 // Joystick control
