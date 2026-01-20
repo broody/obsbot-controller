@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
+import { spawn, ChildProcess } from 'child_process';
 
 // Load native addon
 let obsbot: any;
@@ -13,6 +14,10 @@ try {
 
 let mainWindow: BrowserWindow | null = null;
 let currentDevice: any = null;
+
+// FFmpeg recording state
+let ffmpegProcess: ChildProcess | null = null;
+let ffmpegOutputPath: string | null = null;
 
 function createWindow() {
     mainWindow = new BrowserWindow({
@@ -402,17 +407,22 @@ ipcMain.handle('get-camera-status', async () => {
 });
 
 // Save recording
-ipcMain.handle('save-recording', async (_, buffer: ArrayBuffer) => {
+ipcMain.handle('save-recording', async (_, buffer: ArrayBuffer, mimeType: string) => {
     if (!mainWindow) return null;
 
+    // Determine file extension based on mime type
+    const isMP4 = mimeType.includes('mp4') || mimeType.includes('avc');
+    const extension = isMP4 ? 'mp4' : 'webm';
+    const filterName = isMP4 ? 'MP4 Video' : 'WebM Video';
+
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const defaultPath = path.join(app.getPath('videos'), `OBSBOT_${timestamp}.webm`);
+    const defaultPath = path.join(app.getPath('videos'), `OBSBOT_${timestamp}.${extension}`);
 
     const result = await dialog.showSaveDialog(mainWindow, {
         title: 'Save Recording',
         defaultPath,
         filters: [
-            { name: 'WebM Video', extensions: ['webm'] },
+            { name: filterName, extensions: [extension] },
             { name: 'All Files', extensions: ['*'] }
         ]
     });
@@ -429,4 +439,214 @@ ipcMain.handle('save-recording', async (_, buffer: ArrayBuffer) => {
         console.error('Failed to save recording:', error);
         return null;
     }
+});
+
+// FFmpeg hardware-accelerated recording - captures directly from v4l2 device
+ipcMain.handle('ffmpeg-start-recording', async (_, options: {
+    width: number;
+    height: number;
+    fps: number;
+    useNvenc: boolean;
+    devicePath?: string;  // e.g., '/dev/video0'
+    audioDevice?: string; // PulseAudio device name
+}) => {
+    if (ffmpegProcess) {
+        return { success: false, error: 'Recording already in progress' };
+    }
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    ffmpegOutputPath = path.join(app.getPath('videos'), `OBSBOT_${timestamp}.mp4`);
+
+    // Choose hardware encoder: NVENC HEVC (NVIDIA) or VAAPI (Intel/AMD)
+    const encoder = options.useNvenc ? 'hevc_nvenc' : 'hevc_vaapi';
+
+    let ffmpegArgs: string[];
+
+    if (options.devicePath) {
+        // Direct v4l2 device capture - no IPC bottleneck!
+        ffmpegArgs = [
+            // Video input from v4l2 device
+            '-f', 'v4l2',
+            '-input_format', 'mjpeg',  // MJPEG is usually fastest for high-res
+            '-video_size', `${options.width}x${options.height}`,
+            '-framerate', String(options.fps),
+            '-i', options.devicePath,
+            // Audio input from PulseAudio/PipeWire
+            ...(options.audioDevice ? [
+                '-f', 'pulse',
+                '-i', options.audioDevice
+            ] : []),
+            // Video encoding (hardware)
+            '-c:v', encoder,
+            ...(options.useNvenc
+                ? ['-preset', 'p4', '-rc', 'vbr', '-cq', '23']
+                : ['-vaapi_device', '/dev/dri/renderD128', '-vf', 'format=nv12,hwupload', '-qp', '23']),
+            // Audio encoding
+            ...(options.audioDevice ? ['-c:a', 'aac', '-b:a', '192k'] : []),
+            // Output
+            '-y',
+            ffmpegOutputPath
+        ];
+    } else {
+        // Fallback: raw RGBA frames from stdin (slow due to IPC)
+        const hwAccel = options.useNvenc ? [] : ['-vaapi_device', '/dev/dri/renderD128'];
+        ffmpegArgs = [
+            ...hwAccel,
+            '-f', 'rawvideo',
+            '-pix_fmt', 'rgba',
+            '-s', `${options.width}x${options.height}`,
+            '-r', String(options.fps),
+            '-i', 'pipe:0',
+            '-c:v', encoder,
+            ...(options.useNvenc
+                ? ['-preset', 'p4', '-rc', 'vbr', '-cq', '26']
+                : ['-vf', 'format=nv12,hwupload', '-qp', '26']),
+            '-y',
+            ffmpegOutputPath
+        ];
+    }
+
+    try {
+        ffmpegProcess = spawn('ffmpeg', ffmpegArgs, {
+            stdio: options.devicePath ? ['ignore', 'pipe', 'pipe'] : ['pipe', 'pipe', 'pipe']
+        });
+
+        ffmpegProcess.stderr?.on('data', (data) => {
+            const msg = data.toString();
+            // Only log important messages, not the continuous status
+            if (msg.includes('Error') || msg.includes('error') || msg.includes('failed')) {
+                console.error('FFmpeg error:', msg);
+            }
+        });
+
+        ffmpegProcess.on('close', () => {
+            ffmpegProcess = null;
+        });
+
+        ffmpegProcess.on('error', (err) => {
+            console.error('FFmpeg process error:', err);
+            ffmpegProcess = null;
+        });
+
+        return { success: true, outputPath: ffmpegOutputPath };
+    } catch (error) {
+        console.error('Failed to start FFmpeg:', error);
+        return { success: false, error: String(error) };
+    }
+});
+
+ipcMain.handle('ffmpeg-write-frame', async (_, frameData: ArrayBuffer) => {
+    if (!ffmpegProcess || !ffmpegProcess.stdin?.writable) {
+        return false;
+    }
+
+    try {
+        const buffer = Buffer.from(frameData);
+        return ffmpegProcess.stdin.write(buffer);
+    } catch (error) {
+        console.error('Failed to write frame:', error);
+        return false;
+    }
+});
+
+ipcMain.handle('ffmpeg-stop-recording', async () => {
+    if (!ffmpegProcess) {
+        return { success: false, error: 'No recording in progress' };
+    }
+
+    return new Promise((resolve) => {
+        const outputPath = ffmpegOutputPath;
+
+        ffmpegProcess!.on('close', () => {
+            ffmpegProcess = null;
+            ffmpegOutputPath = null;
+            resolve({ success: true, outputPath });
+        });
+
+        // Send SIGINT to gracefully stop FFmpeg (works for both stdin and device capture)
+        ffmpegProcess!.kill('SIGINT');
+    });
+});
+
+// Find video device path by name
+ipcMain.handle('ffmpeg-find-video-device', async (_, deviceName: string) => {
+    try {
+        const videoDevices = fs.readdirSync('/sys/class/video4linux');
+        // Sort to get video0 before video1, etc.
+        videoDevices.sort();
+
+        const searchTerms = deviceName.toLowerCase().split(/\s+/);
+
+        for (const device of videoDevices) {
+            const namePath = `/sys/class/video4linux/${device}/name`;
+            if (fs.existsSync(namePath)) {
+                const name = fs.readFileSync(namePath, 'utf-8').trim().toLowerCase();
+                const matches = searchTerms.some(term => name.includes(term));
+                if (matches) {
+                    return `/dev/${device}`;
+                }
+            }
+        }
+        return null;
+    } catch (error) {
+        console.error('Failed to find video device:', error);
+        return null;
+    }
+});
+
+// Find PulseAudio audio device by name
+ipcMain.handle('ffmpeg-find-audio-device', async (_, deviceName: string) => {
+    return new Promise((resolve) => {
+        // Use pactl to list sources
+        const proc = spawn('pactl', ['list', 'sources', 'short'], { stdio: ['pipe', 'pipe', 'pipe'] });
+        let output = '';
+
+        proc.stdout?.on('data', (data) => {
+            output += data.toString();
+        });
+
+        proc.on('close', () => {
+            const lines = output.split('\n');
+            const searchTerm = deviceName.toLowerCase();
+
+            for (const line of lines) {
+                const parts = line.split('\t');
+                if (parts.length >= 2) {
+                    const sourceName = parts[1];
+                    if (sourceName.toLowerCase().includes(searchTerm)) {
+                        resolve(sourceName);
+                        return;
+                    }
+                }
+            }
+            resolve(null);
+        });
+
+        proc.on('error', () => {
+            resolve(null);
+        });
+    });
+});
+
+ipcMain.handle('ffmpeg-check-encoders', async () => {
+    return new Promise((resolve) => {
+        const proc = spawn('ffmpeg', ['-encoders'], { stdio: ['pipe', 'pipe', 'pipe'] });
+        let output = '';
+
+        proc.stdout?.on('data', (data) => {
+            output += data.toString();
+        });
+
+        proc.on('close', () => {
+            resolve({
+                hasNvenc: output.includes('h264_nvenc'),
+                hasVaapi: output.includes('h264_vaapi'),
+                hasQsv: output.includes('h264_qsv')
+            });
+        });
+
+        proc.on('error', () => {
+            resolve({ hasNvenc: false, hasVaapi: false, hasQsv: false });
+        });
+    });
 });

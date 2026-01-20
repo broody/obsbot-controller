@@ -168,12 +168,17 @@ let audioAnimationId: number | null = null;
 
 // Recording state
 let mediaRecorder: MediaRecorder | null = null;
+let recordingStream: MediaStream | null = null;  // Holds cloned tracks for recording
 let recordedChunks: Blob[] = [];
 let isRecording = false;
 let recordingStartTime: number = 0;
 let recordingTimerInterval: number | null = null;
 let audioEnabled = false;
 let visualizerType: 'bars' | 'waveform' | 'circular' = 'bars';
+
+// FFmpeg hardware recording state
+let useFFmpegRecording = false;
+let ffmpegEncoders: { hasNvenc: boolean; hasVaapi: boolean; hasQsv: boolean } | null = null;
 
 // DOM Elements
 const deviceSelect = document.getElementById('device-select') as HTMLSelectElement;
@@ -190,9 +195,11 @@ async function init() {
     // Load enums
     enums = await window.obsbot.getEnums();
 
+    // Check for FFmpeg hardware encoders
+    await checkFFmpegEncoders();
+
     // Set up device change listener
-    window.obsbot.onDeviceChanged((event) => {
-        console.log('Device changed:', event);
+    window.obsbot.onDeviceChanged(() => {
         refreshDevices();
     });
 
@@ -536,7 +543,8 @@ async function startVideoPreview() {
             video: {
                 deviceId: obsbotDevice ? { exact: obsbotDevice.deviceId } : undefined,
                 width: { ideal: 3840 },
-                height: { ideal: 2160 }
+                height: { ideal: 2160 },
+                frameRate: { ideal: 30, min: 24 }
             },
             audio: false
         };
@@ -909,32 +917,25 @@ async function startAudioVisualizer(
     levelValue: HTMLSpanElement
 ) {
     try {
-        // Get available audio devices
         const devices = await navigator.mediaDevices.enumerateDevices();
         const audioDevices = devices.filter(d => d.kind === 'audioinput');
-        console.log('DEBUG: Available audio devices:', audioDevices);
 
         // Find the OBSBOT device mic
         const obsbotMic = audioDevices.find(d =>
             d.label.toLowerCase().includes('obsbot') ||
             (currentDevice && d.label.toLowerCase().includes(currentDevice.name.toLowerCase()))
         );
-        console.log('DEBUG: Selected OBSBOT mic:', obsbotMic);
 
         const constraints: MediaStreamConstraints = {
             audio: obsbotMic ? { deviceId: { exact: obsbotMic.deviceId } } : true,
             video: false
         };
-        console.log('DEBUG: Using constraints:', constraints);
 
         try {
             audioStream = await navigator.mediaDevices.getUserMedia(constraints);
-        } catch (e) {
-            console.warn('DEBUG: Failed to get specific mic, trying fallback:', e);
-            // Fallback to default
+        } catch {
             audioStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
         }
-        console.log('DEBUG: Audio stream started successfully');
 
         // Create audio context and analyser
         audioContext = new AudioContext();
@@ -967,10 +968,6 @@ async function startAudioVisualizer(
             audioAnalyser.getByteTimeDomainData(timeDataArray);
 
             frameCount++;
-            if (frameCount % 120 === 0) {
-                 const max = Math.max(...dataArray);
-                 if (max === 0) console.log(`DEBUG: Silence detected. Context state: ${audioContext?.state}`);
-            }
 
             // Clear canvas
             const width = canvas.width = canvas.offsetWidth;
@@ -1163,6 +1160,21 @@ function setupRecording() {
     });
 }
 
+// Canvas and animation frame for recording
+let recordingCanvas: HTMLCanvasElement | null = null;
+let recordingCtx: CanvasRenderingContext2D | null = null;
+let recordingAnimationId: number | null = null;
+
+// Check for FFmpeg hardware encoders on startup
+async function checkFFmpegEncoders() {
+    try {
+        ffmpegEncoders = await window.obsbot.ffmpeg.checkEncoders();
+        useFFmpegRecording = ffmpegEncoders.hasNvenc || ffmpegEncoders.hasVaapi;
+    } catch {
+        useFFmpegRecording = false;
+    }
+}
+
 async function startRecording() {
     if (!videoStream) {
         alert('Please start the preview first before recording.');
@@ -1172,27 +1184,135 @@ async function startRecording() {
     const recordBtn = document.getElementById('record-btn') as HTMLButtonElement;
     const recordTimer = document.getElementById('record-timer') as HTMLSpanElement;
 
-    // Create a combined stream with video and audio (if available)
-    const tracks: MediaStreamTrack[] = [...videoStream.getVideoTracks()];
+    const videoTrack = videoStream.getVideoTracks()[0];
+    const settings = videoTrack.getSettings();
+
+    // Use FFmpeg hardware encoding if available, otherwise fall back to MediaRecorder
+    if (useFFmpegRecording && ffmpegEncoders) {
+        await startFFmpegRecording(settings, recordBtn, recordTimer);
+    } else {
+        await startMediaRecorderRecording(settings, recordBtn, recordTimer);
+    }
+}
+
+async function startFFmpegRecording(
+    settings: MediaTrackSettings,
+    recordBtn: HTMLButtonElement,
+    recordTimer: HTMLSpanElement
+) {
+    // Find the video device path for direct capture
+    // Use 'obsbot' as search term since it's reliably in the v4l2 device name
+    const deviceName = 'obsbot';
+    const devicePath = await window.obsbot.ffmpeg.findVideoDevice(deviceName);
+
+    if (!devicePath) {
+        alert('Could not find video device. Falling back to software encoding.');
+        await startMediaRecorderRecording(settings, recordBtn, recordTimer);
+        return;
+    }
+
+    // Find the audio device (OBSBOT microphone)
+    const audioDevice = await window.obsbot.ffmpeg.findAudioDevice(deviceName);
+
+    const recordWidth = settings.width || 3840;
+    const recordHeight = settings.height || 2160;
+    const fps = 30;
+
+    // Stop browser preview to release the device for FFmpeg
+    stopVideoPreview();
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    const useNvenc = ffmpegEncoders!.hasNvenc;
+
+    const result = await window.obsbot.ffmpeg.startRecording({
+        width: recordWidth,
+        height: recordHeight,
+        fps,
+        useNvenc,
+        devicePath,
+        audioDevice: audioDevice || undefined
+    });
+
+    if (!result.success) {
+        await startVideoPreview();
+        alert('Failed to start hardware recording. Falling back to software encoding.');
+        await startMediaRecorderRecording(settings, recordBtn, recordTimer);
+        return;
+    }
+
+    // No frame capture loop needed - FFmpeg reads directly from the device!
+    isRecording = true;
+    recordingStartTime = Date.now();
+
+    // Update UI
+    recordBtn.classList.add('recording');
+    recordBtn.textContent = 'Stop';
+    recordTimer.classList.remove('hidden');
+
+    // Start timer display
+    recordingTimerInterval = window.setInterval(() => {
+        const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
+        const minutes = Math.floor(elapsed / 60).toString().padStart(2, '0');
+        const seconds = (elapsed % 60).toString().padStart(2, '0');
+        recordTimer.textContent = `${minutes}:${seconds}`;
+    }, 1000);
+}
+
+async function startMediaRecorderRecording(
+    settings: MediaTrackSettings,
+    recordBtn: HTMLButtonElement,
+    recordTimer: HTMLSpanElement
+) {
+    // Create offscreen canvas at 1080p for software encoding (4x fewer pixels than 4K)
+    const recordWidth = 1920;
+    const recordHeight = 1080;
+    recordingCanvas = document.createElement('canvas');
+    recordingCanvas.width = recordWidth;
+    recordingCanvas.height = recordHeight;
+    recordingCtx = recordingCanvas.getContext('2d', { alpha: false })!;
+
+    const canvasStream = recordingCanvas.captureStream(30);
 
     // Add audio track if available
     if (audioStream) {
-        tracks.push(...audioStream.getAudioTracks());
+        audioStream.getAudioTracks().forEach(track => {
+            canvasStream.addTrack(track.clone());
+        });
     }
 
-    const combinedStream = new MediaStream(tracks);
+    recordingStream = canvasStream;
+
+    // Start drawing video to canvas at ~30fps
+    let lastFrameTime = 0;
+    const frameInterval = 1000 / 30;
+
+    const drawFrame = (timestamp: number) => {
+        if (!isRecording || !recordingCtx || !recordingCanvas) return;
+
+        if (timestamp - lastFrameTime >= frameInterval) {
+            recordingCtx.drawImage(videoPreview, 0, 0, recordingCanvas.width, recordingCanvas.height);
+            lastFrameTime = timestamp;
+        }
+
+        recordingAnimationId = requestAnimationFrame(drawFrame);
+    };
 
     // Determine best codec
-    const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
-        ? 'video/webm;codecs=vp9,opus'
-        : MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')
-            ? 'video/webm;codecs=vp8,opus'
-            : 'video/webm';
+    let mimeType: string;
+    if (MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')) {
+        mimeType = 'video/webm;codecs=vp8,opus';
+    } else if (MediaRecorder.isTypeSupported('video/webm;codecs=h264,opus')) {
+        mimeType = 'video/webm;codecs=h264,opus';
+    } else if (MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')) {
+        mimeType = 'video/webm;codecs=vp9,opus';
+    } else {
+        mimeType = 'video/webm';
+    }
 
     try {
-        mediaRecorder = new MediaRecorder(combinedStream, {
+        mediaRecorder = new MediaRecorder(canvasStream, {
             mimeType,
-            videoBitsPerSecond: 5000000 // 5 Mbps
+            videoBitsPerSecond: 8000000
         });
 
         recordedChunks = [];
@@ -1206,26 +1326,19 @@ async function startRecording() {
         mediaRecorder.onstop = async () => {
             const blob = new Blob(recordedChunks, { type: mimeType });
             const arrayBuffer = await blob.arrayBuffer();
-
-            // Save via IPC
-            const savedPath = await window.obsbot.saveRecording(arrayBuffer);
-            if (savedPath) {
-                console.log('Recording saved to:', savedPath);
-            }
-
+            await window.obsbot.saveRecording(arrayBuffer, mimeType);
             recordedChunks = [];
         };
 
-        mediaRecorder.start(1000); // Collect data every second
+        recordingAnimationId = requestAnimationFrame(drawFrame);
+        mediaRecorder.start(1000);
         isRecording = true;
         recordingStartTime = Date.now();
 
-        // Update UI
         recordBtn.classList.add('recording');
         recordBtn.textContent = 'Stop';
         recordTimer.classList.remove('hidden');
 
-        // Start timer
         recordingTimerInterval = window.setInterval(() => {
             const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
             const minutes = Math.floor(elapsed / 60).toString().padStart(2, '0');
@@ -1240,13 +1353,36 @@ async function startRecording() {
 }
 
 async function stopRecording() {
-    if (!mediaRecorder || !isRecording) return;
+    if (!isRecording) return;
 
     const recordBtn = document.getElementById('record-btn') as HTMLButtonElement;
     const recordTimer = document.getElementById('record-timer') as HTMLSpanElement;
 
-    mediaRecorder.stop();
     isRecording = false;
+
+    // Stop FFmpeg or MediaRecorder
+    if (useFFmpegRecording && !mediaRecorder) {
+        await window.obsbot.ffmpeg.stopRecording();
+        await startVideoPreview();
+    } else if (mediaRecorder) {
+        // MediaRecorder recording - stop frame capture loop first
+        if (recordingAnimationId) {
+            cancelAnimationFrame(recordingAnimationId);
+            recordingAnimationId = null;
+        }
+        mediaRecorder.stop();
+        mediaRecorder = null;
+    }
+
+    // Clean up canvas (only used by MediaRecorder fallback now)
+    recordingCanvas = null;
+    recordingCtx = null;
+
+    // Stop tracks used for recording
+    if (recordingStream) {
+        recordingStream.getTracks().forEach(track => track.stop());
+        recordingStream = null;
+    }
 
     // Update UI
     recordBtn.classList.remove('recording');

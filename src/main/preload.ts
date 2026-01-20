@@ -123,6 +123,17 @@ contextBridge.exposeInMainWorld('obsbot', {
     // Camera status (get all current settings)
     getCameraStatus: () => ipcRenderer.invoke('get-camera-status'),
 
-    // Save recording
-    saveRecording: (buffer: ArrayBuffer) => ipcRenderer.invoke('save-recording', buffer)
+    // Save recording (MediaRecorder fallback)
+    saveRecording: (buffer: ArrayBuffer, mimeType: string) => ipcRenderer.invoke('save-recording', buffer, mimeType),
+
+    // FFmpeg hardware-accelerated recording
+    ffmpeg: {
+        checkEncoders: () => ipcRenderer.invoke('ffmpeg-check-encoders'),
+        findVideoDevice: (deviceName: string) => ipcRenderer.invoke('ffmpeg-find-video-device', deviceName),
+        findAudioDevice: (deviceName: string) => ipcRenderer.invoke('ffmpeg-find-audio-device', deviceName),
+        startRecording: (options: { width: number; height: number; fps: number; useNvenc: boolean; devicePath?: string; audioDevice?: string }) =>
+            ipcRenderer.invoke('ffmpeg-start-recording', options),
+        writeFrame: (frameData: ArrayBuffer) => ipcRenderer.invoke('ffmpeg-write-frame', frameData),
+        stopRecording: () => ipcRenderer.invoke('ffmpeg-stop-recording')
+    }
 });
