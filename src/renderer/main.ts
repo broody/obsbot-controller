@@ -1220,6 +1220,21 @@ async function startFFmpegRecording(
 
     // Stop browser preview to release the device for FFmpeg
     stopVideoPreview();
+
+    // Show "Recording" instead of "No Signal" while recording
+    const placeholderIcon = videoPlaceholder.querySelector('i');
+    const placeholderText = videoPlaceholder.querySelector('span');
+    if (placeholderIcon) {
+        placeholderIcon.setAttribute('data-lucide', 'disc');
+        placeholderIcon.classList.add('text-red-500');
+        // Re-render the icon
+        (window as any).lucide.createIcons();
+    }
+    if (placeholderText) {
+        placeholderText.textContent = 'Recording';
+        placeholderText.classList.add('text-red-500');
+    }
+
     await new Promise(resolve => setTimeout(resolve, 500));
 
     const useNvenc = ffmpegEncoders!.hasNvenc;
@@ -1362,6 +1377,19 @@ async function stopRecording() {
 
     // Stop FFmpeg or MediaRecorder
     if (useFFmpegRecording && !mediaRecorder) {
+        // Restore placeholder to "No Signal" before restarting preview
+        const placeholderIcon = videoPlaceholder.querySelector('i');
+        const placeholderText = videoPlaceholder.querySelector('span');
+        if (placeholderIcon) {
+            placeholderIcon.setAttribute('data-lucide', 'video-off');
+            placeholderIcon.classList.remove('text-red-500');
+            (window as any).lucide.createIcons();
+        }
+        if (placeholderText) {
+            placeholderText.textContent = 'No Signal';
+            placeholderText.classList.remove('text-red-500');
+        }
+
         await window.obsbot.ffmpeg.stopRecording();
         await startVideoPreview();
     } else if (mediaRecorder) {
