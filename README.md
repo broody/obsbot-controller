@@ -2,6 +2,8 @@
 
 An Electron application for controlling OBSBOT webcams on Linux. This app provides a graphical interface to control all features of the OBSBOT webcam driver.
 
+![OBSBOT Controller Screenshot](screenshot.png)
+
 ## Features
 
 - **Live Video Preview**: View the webcam feed directly in the application
